@@ -1,0 +1,25 @@
+#!/bin/sh
+
+folder_app="/Applications/iHeadPhones.app/"
+folder_data="/var/mobile/Documents/JypyzProducts/iHeadPhones/"
+
+echo 
+
+if [ -f ${folder_data}headphones.db ] ;then
+	echo Data OK!
+else
+	mkdir -p $folder_data 
+	
+	if [ -f ${folder_app}headphones.db ] ;then
+		echo Moving data...
+		mv ${folder_app}cache ${folder_data}
+		mv ${folder_app}logs ${folder_data}
+		mv ${folder_app}headphones.db ${folder_data}
+	else
+		echo Fresh install!
+	fi
+
+fi
+echo
+echo Pre-flight Done!
+echo
