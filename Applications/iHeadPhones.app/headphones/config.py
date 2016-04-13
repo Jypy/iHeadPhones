@@ -1,7 +1,8 @@
-import headphones.logger
 import itertools
+
 import os
 import re
+import headphones.logger
 from configobj import ConfigObj
 
 
@@ -13,6 +14,21 @@ def bool_int(value):
         if value.lower() in ('', '0', 'false', 'f', 'no', 'n', 'off'):
             value = 0
     return int(bool(value))
+
+
+class path(str):
+    """Internal 'marker' type for paths in config."""
+
+    @staticmethod
+    def __call__(val):
+        return path(val)
+
+    def __new__(cls, *args, **kw):
+        hstr = str.__new__(cls, *args, **kw)
+        return hstr
+
+    def __repr__(self):
+        return 'headphones.config.path(%s)' % self
 
 _CONFIG_DEFINITIONS = {
     'ADD_ALBUM_ART': (int, 'General', 0),
@@ -29,11 +45,11 @@ _CONFIG_DEFINITIONS = {
     'AUTO_ADD_ARTISTS': (int, 'General', 1),
     'BITRATE': (int, 'General', 192),
     'BLACKHOLE': (int, 'General', 0),
-    'BLACKHOLE_DIR': (str, 'General', ''),
+    'BLACKHOLE_DIR': (path, 'General', ''),
     'BOXCAR_ENABLED': (int, 'Boxcar', 0),
     'BOXCAR_ONSNATCH': (int, 'Boxcar', 0),
     'BOXCAR_TOKEN': (str, 'Boxcar', ''),
-    'CACHE_DIR': (str, 'General', ''),
+    'CACHE_DIR': (path, 'General', ''),
     'CACHE_SIZEMB': (int, 'Advanced', 32),
     'CHECK_GITHUB': (int, 'General', 1),
     'CHECK_GITHUB_INTERVAL': (int, 'General', 360),
@@ -42,40 +58,62 @@ _CONFIG_DEFINITIONS = {
     'CONFIG_VERSION': (str, 'General', '0'),
     'CORRECT_METADATA': (int, 'General', 0),
     'CUE_SPLIT': (int, 'General', 1),
-    'CUE_SPLIT_FLAC_PATH': (str, 'General', ''),
-    'CUE_SPLIT_SHNTOOL_PATH': (str, 'General', ''),
+    'CUE_SPLIT_FLAC_PATH': (path, 'General', ''),
+    'CUE_SPLIT_SHNTOOL_PATH': (path, 'General', ''),
+    'CUSTOMAUTH': (int, 'General', 0),
     'CUSTOMHOST': (str, 'General', 'localhost'),
+    'CUSTOMPASS': (str, 'General', ''),
     'CUSTOMPORT': (int, 'General', 5000),
     'CUSTOMSLEEP': (int, 'General', 1),
+    'CUSTOMUSER': (str, 'General', ''),
     'DELETE_LOSSLESS_FILES': (int, 'General', 1),
+    'DELUGE_HOST': (str, 'Deluge', ''),
+    'DELUGE_PASSWORD': (str, 'Deluge', ''),
+    'DELUGE_LABEL': (str, 'Deluge', ''),
+    'DELUGE_DONE_DIRECTORY': (str, 'Deluge', ''),
+    'DELUGE_PAUSED': (int, 'Deluge', 0),
     'DESTINATION_DIR': (str, 'General', ''),
     'DETECT_BITRATE': (int, 'General', 0),
-    'DOWNLOAD_DIR': (str, 'General', ''),
+    'DO_NOT_PROCESS_UNMATCHED': (int, 'General', 0),
+    'DOWNLOAD_DIR': (path, 'General', ''),
     'DOWNLOAD_SCAN_INTERVAL': (int, 'General', 5),
-    'DOWNLOAD_TORRENT_DIR': (str, 'General', ''),
+    'DOWNLOAD_TORRENT_DIR': (path, 'General', ''),
     'DO_NOT_OVERRIDE_GIT_BRANCH': (int, 'General', 0),
+    'EMAIL_ENABLED': (int, 'Email', 0),
+    'EMAIL_FROM': (str, 'Email', ''),
+    'EMAIL_TO': (str, 'Email', ''),
+    'EMAIL_SMTP_SERVER': (str, 'Email', ''),
+    'EMAIL_SMTP_USER': (str, 'Email', ''),
+    'EMAIL_SMTP_PASSWORD': (str, 'Email', ''),
+    'EMAIL_SMTP_PORT': (int, 'Email', 25),
+    'EMAIL_SSL': (int, 'Email', 0),
+    'EMAIL_TLS': (int, 'Email', 0),
+    'EMAIL_ONSNATCH': (int, 'Email', 0),
     'EMBED_ALBUM_ART': (int, 'General', 0),
     'EMBED_LYRICS': (int, 'General', 0),
     'ENABLE_HTTPS': (int, 'General', 0),
     'ENCODER': (str, 'General', 'ffmpeg'),
-    'ENCODERFOLDER': (str, 'General', ''),
+    'ENCODERFOLDER': (path, 'General', ''),
     'ENCODERLOSSLESS': (int, 'General', 1),
     'ENCODEROUTPUTFORMAT': (str, 'General', 'mp3'),
     'ENCODERQUALITY': (int, 'General', 2),
     'ENCODERVBRCBR': (str, 'General', 'cbr'),
     'ENCODER_MULTICORE': (int, 'General', 0),
     'ENCODER_MULTICORE_COUNT': (int, 'General', 0),
-    'ENCODER_PATH': (str, 'General', ''),
+    'ENCODER_PATH': (path, 'General', ''),
     'EXTRAS': (str, 'General', ''),
     'EXTRA_NEWZNABS': (list, 'Newznab', ''),
+    'EXTRA_TORZNABS': (list, 'Torznab', ''),
     'FILE_FORMAT': (str, 'General', 'Track Artist - Album [Year] - Title'),
     'FILE_PERMISSIONS': (str, 'General', '0644'),
+    'FILE_PERMISSIONS_ENABLED': (bool_int, 'General', True),
     'FILE_UNDERSCORES': (int, 'General', 0),
     'FOLDER_FORMAT': (str, 'General', 'Artist/Album [Year]'),
+    'FOLDER_PERMISSIONS_ENABLED': (bool_int, 'General', True),
     'FOLDER_PERMISSIONS': (str, 'General', '0755'),
     'FREEZE_DB': (int, 'General', 0),
     'GIT_BRANCH': (str, 'General', 'master'),
-    'GIT_PATH': (str, 'General', ''),
+    'GIT_PATH': (path, 'General', ''),
     'GIT_USER': (str, 'General', 'rembo10'),
     'GROWL_ENABLED': (int, 'Growl', 0),
     'GROWL_HOST': (str, 'Growl', ''),
@@ -84,17 +122,19 @@ _CONFIG_DEFINITIONS = {
     'HEADPHONES_INDEXER': (bool_int, 'General', False),
     'HPPASS': (str, 'General', ''),
     'HPUSER': (str, 'General', ''),
-    'HTTPS_CERT': (str, 'General', ''),
-    'HTTPS_KEY': (str, 'General', ''),
-    'HTTP_HOST': (str, 'General', '0.0.0.0'),
+    'HTTPS_CERT': (path, 'General', ''),
+    'HTTPS_KEY': (path, 'General', ''),
+    'HTTP_HOST': (str, 'General', 'localhost'),
     'HTTP_PASSWORD': (str, 'General', ''),
     'HTTP_PORT': (int, 'General', 8181),
     'HTTP_PROXY': (int, 'General', 0),
     'HTTP_ROOT': (str, 'General', '/'),
     'HTTP_USERNAME': (str, 'General', ''),
+    'IDTAG': (int, 'Beets', 0),
+    'IGNORE_CLEAN_RELEASES': (int, 'General', 0),
     'IGNORED_WORDS': (str, 'General', ''),
-    'IGNORED_FOLDERS': (list, 'Advanced', []),
-    'IGNORED_FILES': (list, 'Advanced', []),
+    'IGNORED_FOLDERS': (list, 'Advanced', []),  # path
+    'IGNORED_FILES': (list, 'Advanced', []),    # path
     'INCLUDE_EXTRAS': (int, 'General', 0),
     'INTERFACE': (str, 'General', 'default'),
     'JOURNAL_MODE': (str, 'Advanced', 'wal'),
@@ -109,17 +149,17 @@ _CONFIG_DEFINITIONS = {
     'LIBRARYSCAN_INTERVAL': (int, 'General', 300),
     'LMS_ENABLED': (int, 'LMS', 0),
     'LMS_HOST': (str, 'LMS', ''),
-    'LOG_DIR': (str, 'General', ''),
+    'LOG_DIR': (path, 'General', ''),
     'LOSSLESS_BITRATE_FROM': (int, 'General', 0),
     'LOSSLESS_BITRATE_TO': (int, 'General', 0),
-    'LOSSLESS_DESTINATION_DIR': (str, 'General', ''),
+    'LOSSLESS_DESTINATION_DIR': (path, 'General', ''),
     'MB_IGNORE_AGE': (int, 'General', 365),
     'MININOVA': (int, 'Mininova', 0),
     'MININOVA_RATIO': (str, 'Mininova', ''),
     'MIRROR': (str, 'General', 'musicbrainz.org'),
     'MOVE_FILES': (int, 'General', 0),
     'MPC_ENABLED': (bool_int, 'MPC', False),
-    'MUSIC_DIR': (str, 'General', ''),
+    'MUSIC_DIR': (path, 'General', ''),
     'MUSIC_ENCODER': (int, 'General', 0),
     'NEWZNAB': (int, 'Newznab', 0),
     'NEWZNAB_APIKEY': (str, 'Newznab', ''),
@@ -139,10 +179,11 @@ _CONFIG_DEFINITIONS = {
     'NZBSORG_HASH': (str, 'NZBsorg', ''),
     'NZBSORG_UID': (str, 'NZBsorg', ''),
     'NZB_DOWNLOADER': (int, 'General', 0),
+    'OFFICIAL_RELEASES_ONLY': (int, 'General', 0),
     'OMGWTFNZBS': (int, 'omgwtfnzbs', 0),
     'OMGWTFNZBS_APIKEY': (str, 'omgwtfnzbs', ''),
     'OMGWTFNZBS_UID': (str, 'omgwtfnzbs', ''),
-    'OPEN_MAGNET_LINKS': (int, 'General', 0),  # 0: Ignore, 1: Open, 2: Convert
+    'OPEN_MAGNET_LINKS': (int, 'General', 0),  # 0: Ignore, 1: Open, 2: Convert, 3: Embed (rtorrent)
     'MAGNET_LINKS': (int, 'General', 0),
     'OSX_NOTIFY_APP': (str, 'OSX_Notify', '/Applications/Headphones'),
     'OSX_NOTIFY_ENABLED': (int, 'OSX_Notify', 0),
@@ -160,6 +201,7 @@ _CONFIG_DEFINITIONS = {
     'PLEX_SERVER_HOST': (str, 'Plex', ''),
     'PLEX_UPDATE': (int, 'Plex', 0),
     'PLEX_USERNAME': (str, 'Plex', ''),
+    'PLEX_TOKEN': (str, 'Plex', ''),
     'PREFERRED_BITRATE': (str, 'General', ''),
     'PREFERRED_BITRATE_ALLOW_LOSSLESS': (int, 'General', 0),
     'PREFERRED_BITRATE_HIGH_BUFFER': (int, 'General', 0),
@@ -184,7 +226,10 @@ _CONFIG_DEFINITIONS = {
     'PUSHOVER_ONSNATCH': (int, 'Pushover', 0),
     'PUSHOVER_PRIORITY': (int, 'Pushover', 0),
     'RENAME_FILES': (int, 'General', 0),
+    'RENAME_UNPROCESSED': (bool_int, 'General', 1),
+    'RENAME_FROZEN': (bool_int, 'General', 1),
     'REPLACE_EXISTING_FOLDERS': (int, 'General', 0),
+    'KEEP_ORIGINAL_FOLDER': (int, 'General', 0),
     'REQUIRED_WORDS': (str, 'General', ''),
     'RUTRACKER': (int, 'Rutracker', 0),
     'RUTRACKER_PASSWORD': (str, 'Rutracker', ''),
@@ -197,18 +242,29 @@ _CONFIG_DEFINITIONS = {
     'SAB_USERNAME': (str, 'SABnzbd', ''),
     'SAMPLINGFREQUENCY': (int, 'General', 44100),
     'SEARCH_INTERVAL': (int, 'General', 1440),
+    'SOFT_CHROOT': (path, 'General', ''),
     'SONGKICK_APIKEY': (str, 'Songkick', 'nd1We7dFW2RqxPw8'),
     'SONGKICK_ENABLED': (int, 'Songkick', 1),
     'SONGKICK_FILTER_ENABLED': (int, 'Songkick', 0),
     'SONGKICK_LOCATION': (str, 'Songkick', ''),
+    'STRIKE': (int, 'Strike', 0),
+    'STRIKE_RATIO': (str, 'Strike', ''),
     'SUBSONIC_ENABLED': (int, 'Subsonic', 0),
     'SUBSONIC_HOST': (str, 'Subsonic', ''),
     'SUBSONIC_PASSWORD': (str, 'Subsonic', ''),
     'SUBSONIC_USERNAME': (str, 'Subsonic', ''),
     'SYNOINDEX_ENABLED': (int, 'Synoindex', 0),
+    'TELEGRAM_TOKEN': (str, 'Telegram', ''),
+    'TELEGRAM_USERID': (str, 'Telegram', ''),
+    'TELEGRAM_ENABLED': (int, 'Telegram', 0),
+    'TELEGRAM_ONSNATCH': (int, 'Telegram', 0),
     'TORRENTBLACKHOLE_DIR': (str, 'General', ''),
     'TORRENT_DOWNLOADER': (int, 'General', 0),
     'TORRENT_REMOVAL_INTERVAL': (int, 'General', 720),
+    'TORZNAB': (int, 'Torznab', 0),
+    'TORZNAB_APIKEY': (str, 'Torznab', ''),
+    'TORZNAB_ENABLED': (int, 'Torznab', 1),
+    'TORZNAB_HOST': (str, 'Torznab', ''),
     'TRANSMISSION_HOST': (str, 'Transmission', ''),
     'TRANSMISSION_PASSWORD': (str, 'Transmission', ''),
     'TRANSMISSION_USERNAME': (str, 'Transmission', ''),
@@ -224,6 +280,7 @@ _CONFIG_DEFINITIONS = {
     'UTORRENT_PASSWORD': (str, 'uTorrent', ''),
     'UTORRENT_USERNAME': (str, 'uTorrent', ''),
     'VERIFY_SSL_CERT': (bool_int, 'Advanced', 1),
+    'WAIT_UNTIL_RELEASE_DATE': (int, 'General', 0),
     'WAFFLES': (int, 'Waffles', 0),
     'WAFFLES_PASSKEY': (str, 'Waffles', ''),
     'WAFFLES_RATIO': (str, 'Waffles', ''),
@@ -240,6 +297,7 @@ _CONFIG_DEFINITIONS = {
     'XBMC_USERNAME': (str, 'XBMC', ''),
     'XLDPROFILE': (str, 'General', '')
 }
+
 
 # pylint:disable=R0902
 # it might be nice to refactor for fewer instance variables
@@ -261,7 +319,7 @@ class Config(object):
         definition = _CONFIG_DEFINITIONS[key]
         if len(definition) == 3:
             definition_type, section, default = definition
-        else:
+        elif len(definition) == 4:
             definition_type, section, _, default = definition
         return key, definition_type, section, ini_key, default
 
@@ -317,7 +375,7 @@ class Config(object):
         """ Return the extra newznab tuples """
         extra_newznabs = list(
             itertools.izip(*[itertools.islice(self.EXTRA_NEWZNABS, i, None, 3)
-            for i in range(3)])
+                             for i in range(3)])
         )
         return extra_newznabs
 
@@ -331,6 +389,25 @@ class Config(object):
         for item in newznab:
             extra_newznabs.append(item)
         self.EXTRA_NEWZNABS = extra_newznabs
+
+    def get_extra_torznabs(self):
+        """ Return the extra torznab tuples """
+        extra_torznabs = list(
+            itertools.izip(*[itertools.islice(self.EXTRA_TORZNABS, i, None, 3)
+                             for i in range(3)])
+        )
+        return extra_torznabs
+
+    def clear_extra_torznabs(self):
+        """ Forget about the configured extra torznabs """
+        self.EXTRA_TORZNABS = []
+
+    def add_extra_torznab(self, torznab):
+        """ Add a new extra torznab """
+        extra_torznabs = self.EXTRA_TORZNABS
+        for item in torznab:
+            extra_torznabs.append(item)
+        self.EXTRA_TORZNABS = extra_torznabs
 
     def __getattr__(self, name):
         """

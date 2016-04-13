@@ -13,27 +13,32 @@
 #  You should have received a copy of the GNU General Public License
 #  along with Headphones.  If not, see <http://www.gnu.org/licenses/>.
 
-from headphones import logger, request
-
 import time
 import json
 import base64
 import urlparse
+
+from headphones import logger, request
 import headphones
+
 
 # This is just a simple script to send torrents to transmission. The
 # intention is to turn this into a class where we can check the state
 # of the download, set the download dir, etc.
-# TODO: Store the session id so we don't need to make 2 calls
-#       Store torrent id so we can check up on it
+# TODO: Store torrent id so we can check up on it
+
+_session_id = None
 
 
-def addTorrent(link):
+def addTorrent(link, data=None):
     method = 'torrent-add'
 
-    if link.endswith('.torrent'):
-        with open(link, 'rb') as f:
-            metainfo = str(base64.b64encode(f.read()))
+    if link.endswith('.torrent') and not link.startswith('http') or data:
+        if data:
+            metainfo = str(base64.b64encode(data))
+        else:
+            with open(link, 'rb') as f:
+                metainfo = str(base64.b64encode(f.read()))
         arguments = {'metainfo': metainfo, 'download-dir': headphones.CONFIG.DOWNLOAD_TORRENT_DIR}
     else:
         arguments = {'filename': link, 'download-dir': headphones.CONFIG.DOWNLOAD_TORRENT_DIR}
@@ -93,7 +98,6 @@ def setSeedRatio(torrentid, ratio):
 
 
 def removeTorrent(torrentid, remove_data=False):
-
     method = 'torrent-get'
     arguments = {'ids': torrentid, 'fields': ['isFinished', 'name']}
 
@@ -115,7 +119,8 @@ def removeTorrent(torrentid, remove_data=False):
             response = torrentAction(method, arguments)
             return True
         else:
-            logger.info('%s has not finished seeding yet, torrent will not be removed, will try again on next run' % name)
+            logger.info(
+                '%s has not finished seeding yet, torrent will not be removed, will try again on next run' % name)
     except:
         return False
 
@@ -123,7 +128,7 @@ def removeTorrent(torrentid, remove_data=False):
 
 
 def torrentAction(method, arguments):
-
+    global _session_id
     host = headphones.CONFIG.TRANSMISSION_HOST
     username = headphones.CONFIG.TRANSMISSION_USERNAME
     password = headphones.CONFIG.TRANSMISSION_PASSWORD
@@ -145,43 +150,34 @@ def torrentAction(method, arguments):
         parts[2] += "/transmission/rpc"
 
     host = urlparse.urlunparse(parts)
-
-    # Retrieve session id
-    auth = (username, password) if username and password else None
-    response = request.request_response(host, auth=auth,
-        whitelist_status_code=[401, 409])
-
-    if response is None:
-        logger.error("Error gettings Transmission session ID")
-        return
-
-    # Parse response
-    if response.status_code == 401:
-        if auth:
-            logger.error("Username and/or password not accepted by " \
-                "Transmission")
-        else:
-            logger.error("Transmission authorization required")
-
-        return
-    elif response.status_code == 409:
-        session_id = response.headers['x-transmission-session-id']
-
-        if not session_id:
-            logger.error("Expected a Session ID from Transmission")
-            return
-
-    # Prepare next request
-    headers = {'x-transmission-session-id': session_id}
     data = {'method': method, 'arguments': arguments}
+    data_json = json.dumps(data)
+    auth = (username, password) if username and password else None
+    for retry in range(2):
+        if _session_id is not None:
+            headers = {'x-transmission-session-id': _session_id}
+            response = request.request_response(host, method="POST",
+                data=data_json, headers=headers, auth=auth,
+                whitelist_status_code=[200, 401, 409])
+        else:
+            response = request.request_response(host, auth=auth,
+                                            whitelist_status_code=[401, 409])
+        if response.status_code == 401:
+            if auth:
+                logger.error("Username and/or password not accepted by " \
+                            "Transmission")
+            else:
+                logger.error("Transmission authorization required")
+            return
+        elif response.status_code == 409:
+            _session_id = response.headers['x-transmission-session-id']
+            if _session_id is None:
+                logger.error("Expected a Session ID from Transmission, got None")
+                return
+            # retry request with new session id
+            logger.debug("Retrying Transmission request with new session id")
+            continue
 
-    response = request.request_json(host, method="POST", data=json.dumps(data),
-        headers=headers, auth=auth)
-
-    print response
-
-    if not response:
-        logger.error("Error sending torrent to Transmission")
-        return
-
-    return response
+        resp_json = response.json()
+        print resp_json
+        return resp_json

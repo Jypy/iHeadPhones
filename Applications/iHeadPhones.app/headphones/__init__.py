@@ -16,20 +16,21 @@
 # NZBGet support added by CurlyMo <curlymoo1@gmail.com> as a part of
 # XBian - XBMC on the Raspberry Pi
 
-import os
 import sys
 import subprocess
 import threading
 import webbrowser
 import sqlite3
-import cherrypy
 import datetime
 
+import os
+import cherrypy
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
-
 from headphones import versioncheck, logger
 import headphones.config
+from headphones.softchroot import SoftChroot
+import headphones.exceptions
 
 # (append new extras to the end)
 POSSIBLE_EXTRAS = [
@@ -74,6 +75,7 @@ started = False
 DATA_DIR = None
 
 CONFIG = None
+SOFT_CHROOT = None
 
 DB_FILE = None
 
@@ -94,10 +96,10 @@ UMASK = None
 
 
 def initialize(config_file):
-
     with INIT_LOCK:
 
         global CONFIG
+        global SOFT_CHROOT
         global _INITIALIZED
         global CURRENT_VERSION
         global LATEST_VERSION
@@ -131,11 +133,19 @@ def initialize(config_file):
 
                 if not QUIET:
                     sys.stderr.write("Unable to create the log directory. " \
-                        "Logging to screen only.\n")
+                                     "Logging to screen only.\n")
 
         # Start the logger, disable console if needed
         logger.initLogger(console=not QUIET, log_dir=CONFIG.LOG_DIR,
-            verbose=VERBOSE)
+                          verbose=VERBOSE)
+
+        try:
+            SOFT_CHROOT = SoftChroot(str(CONFIG.SOFT_CHROOT))
+            if SOFT_CHROOT.isEnabled():
+                logger.info("Soft-chroot enabled for dir: %s", str(CONFIG.SOFT_CHROOT))
+        except exceptions.SoftChrootError as e:
+            logger.error("SoftChroot error: %s", e)
+            raise e
 
         if not CONFIG.CACHE_DIR:
             # Put the cache dir in the data dir for now
@@ -176,7 +186,7 @@ def initialize(config_file):
                              version_lock_file, e)
 
         # Check for new versions
-        if CONFIG.CHECK_GITHUB_ON_STARTUP:
+        if CONFIG.CHECK_GITHUB and CONFIG.CHECK_GITHUB_ON_STARTUP:
             try:
                 LATEST_VERSION = versioncheck.checkGithub()
             except:
@@ -246,7 +256,6 @@ def daemonize():
 
 
 def launch_browser(host, port, root):
-
     if host == '0.0.0.0':
         host = 'localhost'
 
@@ -287,16 +296,19 @@ def initialize_scheduler():
         hours = CONFIG.UPDATE_DB_INTERVAL
         schedule_job(updater.dbUpdate, 'MusicBrainz Update', hours=hours, minutes=0)
 
-        #Update check
-        if CONFIG.CHECK_GITHUB_INTERVAL:
-            minutes = CONFIG.CHECK_GITHUB_INTERVAL
-        else:
-            minutes = 0
-        schedule_job(versioncheck.checkGithub, 'Check GitHub for updates', hours=0, minutes=minutes)
+        # Update check
+        if CONFIG.CHECK_GITHUB:
+            if CONFIG.CHECK_GITHUB_INTERVAL:
+                minutes = CONFIG.CHECK_GITHUB_INTERVAL
+            else:
+                minutes = 0
+            schedule_job(versioncheck.checkGithub, 'Check GitHub for updates', hours=0,
+                         minutes=minutes)
 
         # Remove Torrent + data if Post Processed and finished Seeding
         minutes = CONFIG.TORRENT_REMOVAL_INTERVAL
-        schedule_job(torrentfinished.checkTorrentFinished, 'Torrent removal check', hours=0, minutes=minutes)
+        schedule_job(torrentfinished.checkTorrentFinished, 'Torrent removal check', hours=0,
+                     minutes=minutes)
 
         # Start scheduler
         if start_jobs and len(SCHED.get_jobs()):
@@ -305,8 +317,8 @@ def initialize_scheduler():
             except Exception as e:
                 logger.info(e)
 
-        # Debug
-        #SCHED.print_jobs()
+                # Debug
+                # SCHED.print_jobs()
 
 
 def schedule_job(function, name, hours=0, minutes=0):
@@ -333,7 +345,6 @@ def schedule_job(function, name, hours=0, minutes=0):
 
 
 def start():
-
     global started
 
     if _INITIALIZED:
@@ -348,16 +359,15 @@ def sig_handler(signum=None, frame=None):
 
 
 def dbcheck():
-
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     c.execute(
-        'CREATE TABLE IF NOT EXISTS artists (ArtistID TEXT UNIQUE, ArtistName TEXT, ArtistSortName TEXT, DateAdded TEXT, Status TEXT, IncludeExtras INTEGER, LatestAlbum TEXT, ReleaseDate TEXT, AlbumID TEXT, HaveTracks INTEGER, TotalTracks INTEGER, LastUpdated TEXT, ArtworkURL TEXT, ThumbURL TEXT, Extras TEXT)')
+        'CREATE TABLE IF NOT EXISTS artists (ArtistID TEXT UNIQUE, ArtistName TEXT, ArtistSortName TEXT, DateAdded TEXT, Status TEXT, IncludeExtras INTEGER, LatestAlbum TEXT, ReleaseDate TEXT, AlbumID TEXT, HaveTracks INTEGER, TotalTracks INTEGER, LastUpdated TEXT, ArtworkURL TEXT, ThumbURL TEXT, Extras TEXT, Type TEXT, MetaCritic TEXT)')
     # ReleaseFormat here means CD,Digital,Vinyl, etc. If using the default
     # Headphones hybrid release, ReleaseID will equal AlbumID (AlbumID is
     # releasegroup id)
     c.execute(
-        'CREATE TABLE IF NOT EXISTS albums (ArtistID TEXT, ArtistName TEXT, AlbumTitle TEXT, AlbumASIN TEXT, ReleaseDate TEXT, DateAdded TEXT, AlbumID TEXT UNIQUE, Status TEXT, Type TEXT, ArtworkURL TEXT, ThumbURL TEXT, ReleaseID TEXT, ReleaseCountry TEXT, ReleaseFormat TEXT, SearchTerm TEXT)')
+        'CREATE TABLE IF NOT EXISTS albums (ArtistID TEXT, ArtistName TEXT, AlbumTitle TEXT, AlbumASIN TEXT, ReleaseDate TEXT, DateAdded TEXT, AlbumID TEXT UNIQUE, Status TEXT, Type TEXT, ArtworkURL TEXT, ThumbURL TEXT, ReleaseID TEXT, ReleaseCountry TEXT, ReleaseFormat TEXT, SearchTerm TEXT, CriticScore TEXT, UserScore TEXT)')
     # Format here means mp3, flac, etc.
     c.execute(
         'CREATE TABLE IF NOT EXISTS tracks (ArtistID TEXT, ArtistName TEXT, AlbumTitle TEXT, AlbumASIN TEXT, AlbumID TEXT, TrackTitle TEXT, TrackDuration, TrackID TEXT, TrackNumber INTEGER, Location TEXT, BitRate INTEGER, CleanName TEXT, Format TEXT, ReleaseID TEXT)')
@@ -583,12 +593,31 @@ def dbcheck():
     except sqlite3.OperationalError:
         c.execute('ALTER TABLE albums ADD COLUMN SearchTerm TEXT DEFAULT NULL')
 
+    try:
+        c.execute('SELECT CriticScore from albums')
+    except sqlite3.OperationalError:
+        c.execute('ALTER TABLE albums ADD COLUMN CriticScore TEXT DEFAULT NULL')
+
+    try:
+        c.execute('SELECT UserScore from albums')
+    except sqlite3.OperationalError:
+        c.execute('ALTER TABLE albums ADD COLUMN UserScore TEXT DEFAULT NULL')
+
+    try:
+        c.execute('SELECT Type from artists')
+    except sqlite3.OperationalError:
+        c.execute('ALTER TABLE artists ADD COLUMN Type TEXT DEFAULT NULL')
+
+    try:
+        c.execute('SELECT MetaCritic from artists')
+    except sqlite3.OperationalError:
+        c.execute('ALTER TABLE artists ADD COLUMN MetaCritic TEXT DEFAULT NULL')
+
     conn.commit()
     c.close()
 
 
 def shutdown(restart=False, update=False):
-
     cherrypy.engine.exit()
     SCHED.shutdown(wait=False)
 

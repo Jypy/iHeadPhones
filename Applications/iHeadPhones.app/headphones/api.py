@@ -13,21 +13,25 @@
 #  You should have received a copy of the GNU General Public License
 #  along with Headphones.  If not, see <http://www.gnu.org/licenses/>.
 
-from headphones import db, mb, updater, importer, searcher, cache, postprocessor, versioncheck, logger
-
-import headphones
 import json
 
-cmd_list = ['getIndex', 'getArtist', 'getAlbum', 'getUpcoming', 'getWanted', 'getSnatched', 'getSimilar', 'getHistory', 'getLogs',
-            'findArtist', 'findAlbum', 'addArtist', 'delArtist', 'pauseArtist', 'resumeArtist', 'refreshArtist',
-            'addAlbum', 'queueAlbum', 'unqueueAlbum', 'forceSearch', 'forceProcess', 'forceActiveArtistsUpdate', 
-            'getVersion', 'checkGithub','shutdown', 'restart', 'update', 'getArtistArt', 'getAlbumArt', 
-            'getArtistInfo', 'getAlbumInfo', 'getArtistThumb', 'getAlbumThumb', 
+from headphones import db, mb, updater, importer, searcher, cache, postprocessor, versioncheck, \
+    logger
+import headphones
+
+cmd_list = ['getIndex', 'getArtist', 'getAlbum', 'getUpcoming', 'getWanted', 'getSnatched',
+            'getSimilar', 'getHistory', 'getLogs',
+            'findArtist', 'findAlbum', 'addArtist', 'delArtist', 'pauseArtist', 'resumeArtist',
+            'refreshArtist',
+            'addAlbum', 'queueAlbum', 'unqueueAlbum', 'forceSearch', 'forceProcess',
+            'forceActiveArtistsUpdate',
+            'getVersion', 'checkGithub', 'shutdown', 'restart', 'update', 'getArtistArt',
+            'getAlbumArt',
+            'getArtistInfo', 'getAlbumInfo', 'getArtistThumb', 'getAlbumThumb', 'clearLogs',
             'choose_specific_download', 'download_specific_release']
 
 
 class Api(object):
-
     def __init__(self):
 
         self.apikey = None
@@ -170,13 +174,19 @@ class Api(object):
         self.data = self._dic_from_query(
             "SELECT * from albums WHERE Status='Snatched'")
         return
-        
+
     def _getSimilar(self, **kwargs):
         self.data = self._dic_from_query('SELECT * from lastfmcloud')
         return
 
     def _getLogs(self, **kwargs):
-        pass
+        self.data = headphones.LOG_LIST
+        return
+
+    def _clearLogs(self, **kwargs):
+        headphones.LOG_LIST = []
+        self.data = 'Cleared log'
+        return
 
     def _findArtist(self, **kwargs):
         if 'name' not in kwargs:
@@ -322,10 +332,15 @@ class Api(object):
         searcher.searchforalbum()
 
     def _forceProcess(self, **kwargs):
-        self.dir = None
-        if 'dir' in kwargs:
+        if 'album_dir' in kwargs:
+            album_dir = kwargs['album_dir']
+            dir = None
+            postprocessor.forcePostProcess(self, dir, album_dir)
+        elif 'dir' in kwargs:
             self.dir = kwargs['dir']
-        postprocessor.forcePostProcess(self.dir)
+            postprocessor.forcePostProcess(self.dir)
+        else:
+            postprocessor.forcePostProcess()
 
     def _forceActiveArtistsUpdate(self, **kwargs):
         updater.dbUpdate()
@@ -426,7 +441,6 @@ class Api(object):
         results_as_dicts = []
 
         for result in results:
-
             result_dict = {
                 'title': result[0],
                 'size': result[1],

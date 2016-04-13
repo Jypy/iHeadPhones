@@ -14,15 +14,14 @@
 #  along with Headphones.  If not, see <http://www.gnu.org/licenses/>.
 
 import random
-import headphones
-import headphones.lock
-
-from headphones import db, logger, request
-
 from collections import defaultdict
 
-TIMEOUT = 60.0 # seconds
-REQUEST_LIMIT = 1.0 / 5 # seconds
+import headphones
+import headphones.lock
+from headphones import db, logger, request
+
+TIMEOUT = 60.0  # seconds
+REQUEST_LIMIT = 1.0 / 5  # seconds
 ENTRY_POINT = "http://ws.audioscrobbler.com/2.0/"
 API_KEY = "395e6ec6bb557382fc41fde867bce66f"
 
@@ -79,7 +78,7 @@ def getSimilar():
                 try:
                     artist_mbid = artist["mbid"]
                     artist_name = artist["name"]
-                except TypeError:
+                except KeyError:
                     continue
 
                 if not any(artist_mbid in x for x in results):
@@ -116,7 +115,7 @@ def getArtists():
         return
 
     logger.info("Fetching artists from Last.FM for username: %s", headphones.CONFIG.LASTFM_USERNAME)
-    data = request_lastfm("library.getartists", limit=10000, user=headphones.CONFIG.LASTFM_USERNAME)
+    data = request_lastfm("library.getartists", limit=1000, user=headphones.CONFIG.LASTFM_USERNAME)
 
     if data and "artists" in data:
         artistlist = []
